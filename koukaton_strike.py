@@ -39,6 +39,8 @@ class Bird(pg.sprite.Sprite):
         self.is_dragging = False
         self.max_drag_dist = 200  
         self.has_shot = False  # このターンで既に発射されたかどうかのフラグ
+        
+        self.has_triggered_combo = False  # このターンに愛情コンボを発動したか
 
     def update(self, screen: pg.Surface, is_my_turn: bool):
         """
@@ -144,6 +146,9 @@ def main():
     enemies = pg.sprite.Group()
     enemy = Enemy((WIDTH * 3 // 4, HEIGHT // 4))
     enemies.add(enemy)
+    # ビームのエフェクトを管理するリスト [始点, 終点, 残り表示フレーム数]
+
+    beams = []
 
     clock = pg.time.Clock()
     
@@ -179,10 +184,34 @@ def main():
                     current_bird.vx = -dx * 0.25
                     current_bird.vy = -dy * 0.25
 
+        # --- 【追加】味方同士の衝突判定（友情コンボ） ---
+        if current_bird.has_shot and not current_bird.has_triggered_combo:
+            # もう一方の待機しているこうかとんを取得
+            other_bird = birds[1] if turn_idx == 0 else birds[0]
+            
+            if current_bird.rect.colliderect(other_bird.rect):
+                current_bird.has_triggered_combo = True  # 1ターンに1回のみに制限
+                
+                # ぶつかったら少し跳ね返る（めり込み防止）
+                current_bird.vx *= -0.5
+                current_bird.vy *= -0.5
+                
+                # すべての敵に向けて、待機側のこうかとんから愛情ビームを放つ
+                for en in enemies:
+                    en.hp -= 2  # 友情コンボによるダメージ
+                    # ビームの情報を追加 [始点, 終点, 表示時間(12フレーム)]
+                    beams.append([other_bird.rect.center, en.rect.center, 12])
+                    
+                    if en.hp <= 0:
+                        en.kill()
+
         # --- ターン切り替えロジック ---
         # 動かしたこうかとんが発射済み、かつ完全に静止したらターンを交代
         if current_bird.has_shot and current_bird.vx == 0.0 and current_bird.vy == 0.0:
             current_bird.has_shot = False  # フラグをリセット
+
+            current_bird.has_triggered_combo = False  # 愛情フラグをリセット
+
             turn_idx = (turn_idx + 1) % len(birds)  # 0と1を交互に切り替え
 
         # 衝突判定の処理（2体とも敵とぶつかる可能性があるためループで処理）
@@ -206,6 +235,17 @@ def main():
             bird.update(screen, is_my_turn=(i == turn_idx))
             
         enemies.update(screen)
+
+        # --- 【追加】愛情コンボビームの更新と描画 ---
+        for beam in beams[:]:
+            start_pos, end_pos, timer = beam
+            # レーザーのデザイン
+            pg.draw.line(screen, (255, 255, 0), start_pos, end_pos, 14)  # 外側の光（黄色）
+            pg.draw.line(screen, (255, 255, 255), start_pos, end_pos, 4) # 内側の芯（白）
+            
+            beam[2] -= 1  # 残りフレーム数を減らす
+            if beam[2] <= 0:
+                beams.remove(beam)  # タイマーが切れたら削除
         
         # 画面上部に現在のターンを表示
         turn_text = font.render(f"現在のターン: {birds[turn_idx].name}", True, (255, 255, 255))
